@@ -1,0 +1,9 @@
+﻿__pycache__/
+*.pyc
+.venv/
+undp_dbt/target/
+undp_dbt/logs/
+undp_dbt/dbt_packages/
+*.log
+.env
+debezium-postgres-connector.json

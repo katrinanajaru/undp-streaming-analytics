@@ -1,0 +1,171 @@
+version: "3.8"
+
+# ---------------------------------------------------------------------------
+# UNDP Streaming Architecture Stack
+# Postgres -> Debezium -> Kafka -> ClickHouse (+ dbt) -> Grafana
+# Orchestration: Airflow | Monitoring: Prometheus
+#
+# Your EXISTING Postgres (undp_analytics) stays where it is (local/pgAdmin).
+# This compose file does NOT create a new Postgres for your UNDP data --
+# it only adds a separate small Postgres for Airflow's own metadata.
+#
+# IMPORTANT: your existing Postgres must have wal_level = logical set
+# (see Step 1 of the setup guide) BEFORE the Debezium connector will work.
+# ---------------------------------------------------------------------------
+
+networks:
+  undp-net:
+    driver: bridge
+
+volumes:
+  clickhouse-data:
+  grafana-data:
+  prometheus-data:
+  airflow-db-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+
+services:
+
+  # -------------------------------------------------------------------------
+  # STREAMING BACKBONE
+  # -------------------------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - undp-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - undp-net
+
+  # Debezium Connect image already bundles the Debezium connector plugins,
+  # including the Postgres connector -- no separate plugin install needed.
+  kafka-connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: kafka-connect
+    depends_on:
+      - kafka
+    ports:
+      - "8084:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: undp-connect-cluster
+      CONFIG_STORAGE_TOPIC: undp_connect_configs
+      OFFSET_STORAGE_TOPIC: undp_connect_offsets
+      STATUS_STORAGE_TOPIC: undp_connect_status
+      # Set this to "host.docker.internal" if your existing Postgres runs
+      # locally on the host machine (outside this compose network).
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+    extra_hosts:
+      # Lets containers reach your existing local Postgres via this hostname
+      - "host.docker.internal:host-gateway"
+    networks:
+      - undp-net
+
+  # -------------------------------------------------------------------------
+  # ANALYTICS TIER
+  # -------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    environment:
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
+    ports:
+      - "8124:8123"   # HTTP interface (host port 8124 -> avoids conflict with another local service on 8123)
+      - "9001:9000"   # native client interface (host port 9001 -> avoids conflict with another local service on 9000)
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - undp-net
+
+  # -------------------------------------------------------------------------
+  # ORCHESTRATION (Airflow standalone -- single container, own metadata DB)
+  # -------------------------------------------------------------------------
+  airflow-db:
+    image: postgres:16
+    container_name: airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    networks:
+      - undp-net
+
+  airflow:
+    image: apache/airflow:2.10.2
+    container_name: airflow
+    depends_on:
+      - airflow-db
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: standalone
+    networks:
+      - undp-net
+
+  # -------------------------------------------------------------------------
+  # OBSERVABILITY
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9091:9090"
+    networks:
+      - undp-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    depends_on:
+      - clickhouse
+      - prometheus
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - undp-net

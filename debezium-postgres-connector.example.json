@@ -1,0 +1,30 @@
+{
+  "name": "undp-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+    "database.hostname": "host.docker.internal",
+    "database.port": "5433",
+    "database.user": "postgres",
+    "database.password": "YOUR_POSTGRES_PASSWORD",
+    "database.dbname": "undp_analytics",
+
+    "topic.prefix": "undp",
+
+    "table.include.list": "public.projects,public.regions,public.funding,public.beneficiaries",
+
+    "plugin.name": "pgoutput",
+
+    "slot.name": "undp_debezium_slot_v2",
+    "publication.name": "undp_debezium_publication_v2",
+
+    "decimal.handling.mode": "double",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false",
+
+    "snapshot.mode": "initial"
+  }
+}
