@@ -46,10 +46,13 @@ docker compose ps
 | ClickHouse HTTP | `localhost:8124` | Native protocol is on `localhost:9001`. |
 | Debezium Connect REST API | <http://localhost:8084> | PostgreSQL connector registration endpoint. |
 | Grafana | <http://localhost:3001> | Compose currently sets the development login to `admin` / `admin`. |
-| Prometheus | <http://localhost:9091> | Scrape configuration is in `prometheus/prometheus.yml`. |
+| Prometheus | <http://localhost:9091> | Scrapes Kafka broker/topic/consumer-group metrics through Kafka Exporter. |
+| Kafka Exporter | <http://localhost:9308/metrics> | Exposes Kafka metrics to Prometheus. |
 | Kafka | `localhost:9092` | Internal Compose clients use `kafka:29092`. |
 
 The current Airflow metadata database password and Grafana login are development defaults in `docker-compose.yml`. Change them before exposing this stack beyond a trusted local environment.
+
+Prometheus scrapes Kafka metrics through Kafka Exporter. Kafka Connect worker/JVM metrics are not included; those require a separate JMX exporter setup.
 
 ## PostgreSQL CDC setup
 

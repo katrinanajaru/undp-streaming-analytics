@@ -6,8 +6,6 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Kafka Connect exposes basic metrics you can scrape once JMX exporter
-  # is added later. Left here as a placeholder target for now.
-  - job_name: "kafka-connect"
+  - job_name: "kafka"
     static_configs:
-      - targets: ["kafka-connect:8083"]
+      - targets: ["kafka-exporter:9308"]
