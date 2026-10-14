@@ -1,0 +1,6 @@
+dbt-clickhouse==1.8.6
+clickhouse-connect==0.8.17
+pandas==2.1.4
+numpy==1.26.4
+scikit-learn==1.5.2
+shap==0.46.0

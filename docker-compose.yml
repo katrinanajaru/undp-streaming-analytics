@@ -123,7 +123,10 @@ services:
       - undp-net
 
   airflow:
-    image: apache/airflow:2.10.2
+    image: undp-airflow:2.10.2
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
     container_name: airflow
     depends_on:
       - airflow-db
@@ -131,10 +134,20 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      PG_HOST: "${PG_HOST:-host.docker.internal}"
+      PG_PORT: "${PG_PORT:-5433}"
+      PG_DB: "${PG_DB:-undp_analytics}"
+      PG_USER: "${PG_USER:-postgres}"
+      PG_PASSWORD: "${PG_PASSWORD:-}"
     ports:
       - "8081:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./undp_dbt:/opt/airflow/dbt:ro
+      - ./ai_scoring_engine.py:/opt/airflow/scripts/ai_scoring_engine.py:ro
     command: standalone
     networks:
       - undp-net

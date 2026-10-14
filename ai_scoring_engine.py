@@ -31,13 +31,14 @@ from sklearn.preprocessing import LabelEncoder
 import shap
 import clickhouse_connect
 import json
+import os
 
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
 CLICKHOUSE_CONFIG = {
-    "host": "localhost",
-    "port": 8124,          # matches the remapped ClickHouse HTTP port
+    "host": os.environ.get("CLICKHOUSE_HOST", "localhost"),
+    "port": int(os.environ.get("CLICKHOUSE_PORT", "8124")),
     "username": "default",
     "password": __import__("os").environ.get("CLICKHOUSE_PASSWORD", ""),
 }

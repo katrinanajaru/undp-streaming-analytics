@@ -1,0 +1,13 @@
+undp_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      schema: undp
+      host: clickhouse
+      port: 8123
+      user: default
+      password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
+      secure: false
+      verify: false
+      threads: 4

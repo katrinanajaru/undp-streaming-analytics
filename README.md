@@ -7,9 +7,10 @@ A local development stack for capturing changes from an existing UNDP PostgreSQL
 - Docker Compose services for Kafka, ZooKeeper, Debezium Connect, ClickHouse, Airflow, Prometheus, and Grafana.
 - A Debezium PostgreSQL source connector example for the `projects`, `regions`, `funding`, and `beneficiaries` tables.
 - dbt staging and mart models under `undp_dbt/models`.
+- An Airflow DAG that provisions CDC ingestion and runs dbt plus impact scoring every 15 minutes.
 - A PostgreSQL data simulator and a Python impact-scoring script.
 
-The Compose stack does not currently configure a Kafka-to-ClickHouse sink connector, provision a Grafana data source, or include Airflow DAGs. Those pieces must be added/configured separately for a fully automated end-to-end pipeline. The dbt models expect the source tables to be available in ClickHouse's `undp` database.
+ClickHouse's native Kafka engine consumes Debezium topics and materialized views write source rows into the `undp` database. The Airflow DAG creates these tables/views, registers or checks the Debezium connector, waits for source data, then runs dbt and impact scoring. A Grafana data source is not provisioned automatically.
 
 ## Prerequisites
 
@@ -22,20 +23,20 @@ The PostgreSQL database is not created by this Compose file. The `airflow-db` se
 
 ## Configure and start the stack
 
-In PowerShell, create `.env` from the template if needed, then set a private ClickHouse password in `.env`:
+In PowerShell, create `.env` from the template if needed, then set private ClickHouse and PostgreSQL credentials in `.env`:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 ```
 
-Set `CLICKHOUSE_PASSWORD` to a non-default value. `.env` is ignored by Git; do not commit it.
+Set `CLICKHOUSE_PASSWORD` and `PG_PASSWORD` to the credentials for your ClickHouse and existing PostgreSQL servers. Adjust `PG_HOST`, `PG_PORT`, `PG_DB`, and `PG_USER` if your PostgreSQL settings differ. `.env` is ignored by Git; do not commit it.
 
 Validate the Compose configuration and start the services:
 
 ```powershell
 docker compose config --quiet
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
 
@@ -50,40 +51,24 @@ docker compose ps
 
 The current Airflow metadata database password and Grafana login are development defaults in `docker-compose.yml`. Change them before exposing this stack beyond a trusted local environment.
 
-## Configure PostgreSQL CDC
+## PostgreSQL CDC setup
 
-Copy the connector template to the ignored local config file and edit its database settings and password:
+The DAG uses the settings in `.env` to register `undp-postgres-connector` with Debezium. The connector example remains available as a reference, but you do not need to register it manually. The first DAG run creates the ClickHouse Kafka tables and materialized views before registering the connector. Later runs reuse a healthy connector.
 
-```powershell
-Copy-Item .\debezium-postgres-connector.example.json .\debezium-postgres-connector.json
-notepad .\debezium-postgres-connector.json
-```
-
-The template targets `host.docker.internal:5433`, database `undp_analytics`, and the four tables listed in the prerequisites. The real connector file is ignored by Git because it contains credentials.
-
-Register the connector after the stack is running:
-
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8084/connectors" `
-  -ContentType "application/json" `
-  -InFile ".\debezium-postgres-connector.json"
-```
-
-Check connector status:
+Check connector status at any time:
 
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:8084/connectors/undp-postgres-connector/status"
 ```
 
-This creates Debezium change-event topics in Kafka. A sink connector or other consumer is still needed to load those events into ClickHouse.
+PostgreSQL must be running with logical replication enabled. The DAG waits for all four source tables to contain data before starting dbt.
 
 ## Run dbt models
 
-The dbt project uses the profile name `undp_dbt`, but `profiles.yml` is intentionally not included. Install a ClickHouse dbt adapter and create `~/.dbt/profiles.yml` with a profile named `undp_dbt` that connects to `localhost:8124`, database/schema `undp`, and the local ClickHouse credentials.
+The project includes `undp_dbt/profiles.yml`, which the Airflow DAG uses to connect to ClickHouse on the Compose network. For manual dbt runs from Windows, install the ClickHouse adapter and set the password environment variable before running dbt:
 
 ```powershell
+$env:CLICKHOUSE_PASSWORD = "<your ClickHouse password>"
 python -m pip install dbt-clickhouse
 Set-Location .\undp_dbt
 dbt debug
@@ -114,6 +99,10 @@ python .\ai_scoring_engine.py
 ```
 
 The scoring script writes refreshed results to `undp.impact_scores`.
+
+## Automated Airflow pipeline
+
+After `docker compose up -d --build`, Airflow schedules `undp_analytics_pipeline` every 15 minutes. Each run ensures ClickHouse CDC tables and the Debezium connector are ready, waits for source rows, runs `dbt run`, then refreshes `undp.impact_scores`. View run status at <http://localhost:8081>. The external PostgreSQL server and its initial schema/data remain prerequisites; the Compose stack does not create that database.
 
 ## Stop services
 
